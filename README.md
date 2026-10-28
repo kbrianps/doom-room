@@ -59,7 +59,8 @@ Everything else lives in `src/net.c`: spawning and moving ghosts, cosmetic trace
 Each tab publishes one presence object per tic (`web/net.js`):
 
 ```js
-{ v, map, x, y, z, a,      // pose, Doom fixed point
+{ v, nm, c,                // protocol, chosen name, color
+  map, x, y, z, a,         // pose, Doom fixed point
   d, m, w, hp,             // dead, moving, weapon, health
   f,                       // trigger pulls so far
   h: [[peer, seq, dmg]],   // last 16 hits this player dealt
@@ -70,6 +71,7 @@ Each tab publishes one presence object per tic (`web/net.js`):
 * **The shooter decides hits.** If your bullet hits a ghost in your world, you add `[victim, seq, damage]` to your hit ring. The victim applies every entry with a new `seq`, so a coalesced update loses nothing.
 * **The victim decides deaths.** When you die, you increment `kb[killer]`. Everyone computes everyone's frags from all the `kb` maps, so a player who joins mid-match sees the right scoreboard.
 * **Ghosts are rendered 100 ms in the past** and interpolated between samples, which hides the 30 Hz update rate. Jumps longer than 256 units (teleports, respawns) snap instead of sliding.
+* **Name tags use the renderer's own projection.** `net_ghost_screen` runs the same math as `R_ProjectSprite` plus a line-of-sight check, so a name floats exactly over the head and disappears behind walls.
 * **Remote shots are visual only.** A ghost's rocket explodes and its shotgun sprays puffs and blood, but none of it does damage, because the real damage arrives through the hit ring.
 
 `tools/duel_test.mjs` runs two engines in Node through a fake room that mimics the real contract and checks that a kill goes through end to end.

@@ -62,16 +62,50 @@
   dt { color: var(--fg); white-space: nowrap; }
   dd { margin: 0; color: var(--muted); }
   .credit { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 0; }
+
+  /* Panel hidden: the screen takes the whole width. */
+  .cabinet.wide { grid-template-columns: minmax(0, 1fr); }
+  #toggle {
+    position: absolute; top: 8px; left: 8px; z-index: 3;
+    font: 600 11px var(--font-ui); letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--fg); background: rgba(0, 0, 0, 0.55); border: 1px solid var(--line);
+    padding: 4px 8px; cursor: pointer; opacity: 0.6;
+  }
+  #toggle:hover, #toggle:focus-visible { opacity: 1; outline: 1px solid var(--accent); }
+
+  /* Name tags float over each visible ghost's head. */
+  #tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .tag {
+    position: absolute; transform: translate(-50%, -100%); white-space: nowrap;
+    font-weight: 600; letter-spacing: 0.04em; text-shadow: 0 0 3px #000, 0 1px 1px #000;
+  }
+
+  #nick-form { display: flex; gap: 6px; }
+  #nick {
+    flex: 1; min-width: 0; font: 14px var(--font-ui); color: var(--fg);
+    background: var(--bg); border: 1px solid var(--line); padding: 6px 8px;
+  }
+  #nick:focus { outline: 1px solid var(--accent); }
+  .hint { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600&display=swap">
 
-<div class="cabinet">
+<div class="cabinet" id="cabinet">
   <div id="screen" tabindex="0" aria-label="Game screen">
     <canvas id="c" width="320" height="200"></canvas>
+    <div id="tags"></div>
     <div id="feed" aria-live="polite"></div>
+    <button id="toggle" type="button" aria-controls="side" aria-expanded="true">Hide panel</button>
     <div id="status">Loading...</div>
   </div>
-  <aside>
+  <aside id="side">
+    <section class="panel">
+      <p class="label"><label for="nick">Your name</label></p>
+      <form id="nick-form">
+        <input id="nick" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Marine">
+      </form>
+      <p class="hint">Shown over your head and on the scoreboard.</p>
+    </section>
     <section class="panel">
       <p class="label">Scoreboard · MAP01</p>
       <ul id="board"><li><span></span><span class="name">Just you so far</span><span></span></li></ul>
@@ -89,6 +123,7 @@
         <dt>Space / E</dt><dd>doors, switches, respawn</dd>
         <dt>1 to 7</dt><dd>switch weapon</dd>
         <dt>Shift</dt><dd>run</dd>
+        <dt>`</dt><dd>hide or show this panel</dd>
       </dl>
     </section>
     <p class="credit">Engine: Doom (id Software, GPL) via doomgeneric. Maps: FreeDM from the Freedoom project (BSD license).</p>
@@ -126,9 +161,42 @@
     throw e;
   }
 
+  // ---- side panel -----------------------------------------------------
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  const cabinet = document.getElementById("cabinet");
+  const side = document.getElementById("side");
+  const toggleBtn = document.getElementById("toggle");
+  function togglePanel(show = side.hidden) {
+    side.hidden = !show;
+    cabinet.classList.toggle("wide", !show);
+    toggleBtn.textContent = show ? "Hide panel" : "Show panel";
+    toggleBtn.setAttribute("aria-expanded", String(show));
+    store.set("doomroom.panel", show ? "shown" : "hidden");
+  }
+  toggleBtn.addEventListener("mousedown", (e) => e.stopPropagation()); // don't grab the mouse or fire
+  toggleBtn.addEventListener("click", () => { togglePanel(); screen.focus(); });
+  if (store.get("doomroom.panel") === "hidden") togglePanel(false);
+
+  // ---- your name ------------------------------------------------------
+  const nickInput = document.getElementById("nick");
+  let myNick = (store.get("doomroom.nick") || "").slice(0, 20);
+  nickInput.value = myNick;
+  const nickChanged = new Set();
+  nickInput.addEventListener("input", () => {
+    myNick = nickInput.value.trim().slice(0, 20);
+    store.set("doomroom.nick", myNick);
+    for (const fn of nickChanged) fn(myNick);
+  });
+  document.getElementById("nick-form").addEventListener("submit", (e) => { e.preventDefault(); screen.focus(); });
+
   // ---- input ----------------------------------------------------------
   const held = new Set();
   const onKey = (down) => (e) => {
+    if (e.target instanceof HTMLInputElement) return; // typing a name, not playing
+    if (e.code === "Backquote") { if (down) { e.preventDefault(); togglePanel(); } return; }
     const k = DOOM_KEYS[e.code];
     if (k === undefined) return;
     e.preventDefault();
@@ -173,7 +241,14 @@
         for (const id of missing) names.set(id, (ps[id] && ps[id].name) || "");
       } catch {}
     }
-    const nameOf = (row) => (row.me ? names.get(myId) : names.get(row.by)) || row.nick || "Marine " + String(row.peer || "").slice(0, 4);
+    // A typed name wins; otherwise the claude.ai profile name; otherwise a tag.
+    const nameOf = (row) => (row.me ? myNick : row.nick) || names.get(row.me ? myId : row.by) || "Marine " + String(row.peer || "").slice(0, 4);
+    resolveNames([myId]).then(() => { if (names.get(myId)) nickInput.placeholder = names.get(myId); });
+    nickChanged.add((n) => { net.setNick(n); lastBoard = ""; renderBoard(); });
+
+    // Name tags over ghosts. One element per peer, moved every tic.
+    const tagsEl = document.getElementById("tags");
+    const tagEls = new Map();
 
     // Each tab picks a non-green color; green is always "you" on your own screen.
     const color = 1 + Math.floor(Math.random() * 3);
@@ -181,10 +256,30 @@
     let lastBoard = "";
     let rowsCache = [];
     net = startNet({
-      doom, room, color,
+      doom, room, color, nick: myNick,
+      onTags(tags) {
+        const seen = new Set();
+        for (const t of tags) {
+          seen.add(t.peer);
+          let el = tagEls.get(t.peer);
+          if (!el) { el = document.createElement("div"); el.className = "tag"; tagsEl.append(el); tagEls.set(t.peer, el); }
+          const text = nameOf(t);
+          if (el.textContent !== text) el.textContent = text;
+          el.style.color = SWATCH[t.color];
+          el.style.left = (t.x / 320) * 100 + "%";
+          el.style.top = (t.y / 200) * 100 + "%";
+          // Bigger up close, never unreadable far away.
+          const px = Math.max(10, Math.min(18, 2200 / Math.max(t.dist, 1)));
+          el.style.fontSize = (px * tagsEl.clientWidth) / 960 + "px";
+          el.hidden = false;
+        }
+        for (const [peer, el] of tagEls) {
+          if (!seen.has(peer)) { el.hidden = true; if (!room.peers().some((p) => p.peer === peer)) { el.remove(); tagEls.delete(peer); } }
+        }
+      },
       onScore(rows) {
         rowsCache = rows;
-        const key = JSON.stringify(rows.map((r) => [r.peer, r.frags, r.by]));
+        const key = JSON.stringify(rows.map((r) => [r.peer, r.frags, r.by, r.nick]));
         if (key === lastBoard) return;
         lastBoard = key;
         renderBoard();

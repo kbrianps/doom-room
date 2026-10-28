@@ -12,7 +12,7 @@ const HIT_RING = 16;
 const INTERP_DELAY_MS = 100;
 const SNAP_DIST = 256 * 65536; // teleports and respawns: jump, don't glide
 
-export function startNet({ doom, room, nick = "", color = 3, onScore, onFeed }) {
+export function startNet({ doom, room, nick = "", color = 3, onScore, onFeed, onTags }) {
   const ex = doom.exports;
   const buf = ex.dg_malloc(64);
   const read16 = () => Array.from(new Int32Array(doom.memory().buffer, buf, 16));
@@ -161,6 +161,18 @@ export function startNet({ doom, room, nick = "", color = 3, onScore, onFeed }) 
     }
     ex.net_set_frags(frags);
 
+    // Name tags: where each visible ghost's head is on the 320x200 screen.
+    if (onTags) {
+      const tags = [];
+      for (const [peer, r] of others) {
+        if (r.slot < 0) continue;
+        ex.net_ghost_screen(r.slot, buf);
+        const [x, y, visible, dist] = read16();
+        if (visible) tags.push({ peer, x, y, dist, by: r.by, nick: r.p.nm || "", color: r.p.c & 3 });
+      }
+      onTags(tags);
+    }
+
     // 4. Publish ourselves.
     if (inLevel) {
       room.presence({
@@ -190,6 +202,7 @@ export function startNet({ doom, room, nick = "", color = 3, onScore, onFeed }) 
   return {
     tick,
     get peer() { return myPeer; },
+    setNick(n) { nick = String(n || "").slice(0, 20); },
     stop() { unsubPeers(); for (const peer of [...others.keys()]) release(peer); },
   };
 }

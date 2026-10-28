@@ -76,9 +76,10 @@ const B = await player("B");
 const feeds = { A: [], B: [] };
 
 let aPose = null;
+let aTags = [];
 A.net = startNet({ doom: A.doom, room: hub.join("peerA", (p) => (aPose = p)), color: 1,
-  onFeed: (e) => feeds.A.push(e) });
-B.net = startNet({ doom: B.doom, color: 3, onFeed: (e) => feeds.B.push(e),
+  onFeed: (e) => feeds.A.push(e), onTags: (t) => { if (t.length) aTags = t; } });
+B.net = startNet({ doom: B.doom, color: 3, nick: "Bravo", onFeed: (e) => feeds.B.push(e),
   room: hub.join("peerB", (p) => {
     if (!aPose) return p;
     const a = (aPose.a / 2 ** 32) * 2 * Math.PI;
@@ -102,6 +103,8 @@ const checks = [
   ["B died from A's shots", diedAfter !== null, diedAfter !== null ? `${diedAfter} ms` : "timed out"],
   ["B credits the frag to A", credited(feeds.B), JSON.stringify(feeds.B)],
   ["A sees its own frag", credited(feeds.A), JSON.stringify(feeds.A)],
+  ["A sees B's name tag above its head", aTags.some((t) => t.peer === "peerB" && t.nick === "Bravo" && t.y < 100),
+    JSON.stringify(aTags.map(({ peer, nick, x, y }) => ({ peer, nick, x, y })))],
   ["A is untouched", A.local()[4] === 100 && Object.keys(aPose?.kb || {}).length === 0, `health ${A.local()[4]}`],
 ];
 let ok = true;

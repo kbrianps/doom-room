@@ -16,6 +16,9 @@
 #include "p_local.h"
 #include "p_mobj.h"
 #include "tables.h"
+#include "r_main.h"
+#include "r_state.h"
+#include <stdlib.h>
 
 #include "net.h"
 
@@ -244,6 +247,45 @@ void net_ghost_fire(int slot, int weapon)
     case wp_bfg:          ghost_missile(mo, MT_BFG); break;
     default: break; // fist and chainsaw: the attack frame is enough
     }
+}
+
+// Where to draw a ghost's name tag, using the renderer's own projection
+// (same math as R_ProjectSprite). Writes 4 int32s: screen x, screen y of the
+// point just above the head (320x200 pixels), visible flag, distance in map
+// units. Hidden when behind the camera, off screen, or behind a wall.
+EXPORT("net_ghost_screen")
+void net_ghost_screen(int slot, int *out)
+{
+    out[0] = out[1] = out[2] = out[3] = 0;
+    if (slot < 0 || slot >= NET_MAX_GHOSTS || !ghosts[slot] || gamestate != GS_LEVEL)
+        return;
+    mobj_t *mo = ghosts[slot];
+    mobj_t *me = players[consoleplayer].mo;
+    if (!me || ghost_dead[slot])
+        return;
+
+    fixed_t tr_x = mo->x - viewx;
+    fixed_t tr_y = mo->y - viewy;
+    fixed_t tz = FixedMul(tr_x, viewcos) + FixedMul(tr_y, viewsin);
+    if (tz < 4 * FRACUNIT)
+        return;
+    fixed_t tx = FixedMul(tr_x, viewsin) - FixedMul(tr_y, viewcos);
+    if (abs(tx) > (tz << 2))
+        return;
+    fixed_t scale = FixedDiv(projection, tz);
+    fixed_t top = mo->z + mo->info->height + 6 * FRACUNIT;
+
+    int x = ((centerxfrac + FixedMul(tx, scale)) >> FRACBITS) << detailshift;
+    int y = (centeryfrac - FixedMul(top - viewz, scale)) >> FRACBITS;
+    if (x < 0 || x >= (viewwidth << detailshift))
+        return;
+    if (!P_CheckSight(me, mo))
+        return;
+
+    out[0] = x + viewwindowx;
+    out[1] = y + viewwindowy;
+    out[2] = 1;
+    out[3] = tz >> FRACBITS;
 }
 
 // Damage the local player dealt to each ghost since the last call.
