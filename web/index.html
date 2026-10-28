@@ -1,0 +1,234 @@
+<title>Doom Room</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Single dark look on purpose: an arcade cabinet. Screen left, scoreboard right; stacks on phones. */
+  :root {
+    --bg: #0d0b0a;
+    --panel: #18130f;
+    --line: #2c231c;
+    --fg: #ebe2d5;
+    --muted: #8f8377;
+    --accent: #e0531f;
+    --good: #7fbf5a;
+    --font-ui: "Chakra Petch", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-ui);
+    box-sizing: border-box; display: grid; place-items: center;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 16px;
+  }
+  .cabinet {
+    width: min(100%, 1180px);
+    display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 14px; align-items: start;
+  }
+  @media (max-width: 760px) { .cabinet { grid-template-columns: minmax(0, 1fr); } }
+
+  #screen {
+    position: relative; width: 100%; aspect-ratio: 8 / 5; max-width: 100%;
+    background: #000; outline: 1px solid var(--line); cursor: crosshair;
+  }
+  #screen:focus-visible { outline: 2px solid var(--accent); }
+  canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  #status {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    background: rgba(13, 11, 10, 0.85); font-size: 15px; letter-spacing: 0.04em; padding: 16px;
+  }
+  #status.error { color: var(--accent); }
+  #feed {
+    position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    pointer-events: none; font-size: 13px; text-shadow: 0 1px 2px #000;
+  }
+  #feed div { background: rgba(0, 0, 0, 0.55); padding: 3px 8px; animation: fade 6s forwards; }
+  #feed .me { color: var(--accent); }
+  @keyframes fade { 0%, 80% { opacity: 1 } 100% { opacity: 0 } }
+  @media (prefers-reduced-motion: reduce) { #feed div { animation: none; } }
+
+  aside { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); padding: 12px 14px; }
+  .label { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+  #board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-variant-numeric: tabular-nums; }
+  #board li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 14px; }
+  #board .dot { width: 10px; height: 10px; }
+  #board .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .you { color: var(--accent); }
+  #board .frags { font-weight: 600; }
+  #room { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; }
+  #room b { color: var(--good); font-weight: 600; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; }
+  dt { color: var(--fg); white-space: nowrap; }
+  dd { margin: 0; color: var(--muted); }
+  .credit { font-size: 11px; color: var(--muted); line-height: 1.5; margin: 0; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600&display=swap">
+
+<div class="cabinet">
+  <div id="screen" tabindex="0" aria-label="Game screen">
+    <canvas id="c" width="320" height="200"></canvas>
+    <div id="feed" aria-live="polite"></div>
+    <div id="status">Loading...</div>
+  </div>
+  <aside>
+    <section class="panel">
+      <p class="label">Scoreboard · MAP01</p>
+      <ul id="board"><li><span></span><span class="name">Just you so far</span><span></span></li></ul>
+    </section>
+    <section class="panel">
+      <p class="label">Room</p>
+      <p id="room">Connecting...</p>
+    </section>
+    <section class="panel">
+      <p class="label">Controls</p>
+      <dl>
+        <dt>Click</dt><dd>grab the mouse, fire</dd>
+        <dt>WASD / arrows</dt><dd>move and turn</dd>
+        <dt>Ctrl</dt><dd>fire</dd>
+        <dt>Space / E</dt><dd>doors, switches, respawn</dd>
+        <dt>1 to 7</dt><dd>switch weapon</dd>
+        <dt>Shift</dt><dd>run</dd>
+      </dl>
+    </section>
+    <p class="credit">Engine: Doom (id Software, GPL) via doomgeneric. Maps: FreeDM from the Freedoom project (BSD license).</p>
+  </aside>
+</div>
+
+<script type="module">
+  import { startDoom, DOOM_KEYS } from "./doom.js";
+  import { startNet } from "./net.js";
+
+  // Doom's player colors: 0 green (always you), 1 indigo, 2 brown, 3 red.
+  const SWATCH = ["#5fa040", "#8a8aa0", "#a0743c", "#c8402c"];
+
+  const screen = document.getElementById("screen");
+  const statusEl = document.getElementById("status");
+  const boardEl = document.getElementById("board");
+  const roomEl = document.getElementById("room");
+  const feedEl = document.getElementById("feed");
+  const setStatus = (s, error) => { statusEl.hidden = !s; statusEl.textContent = s; statusEl.classList.toggle("error", !!error); };
+
+  let net = null;
+  let doom;
+  try {
+    doom = await startDoom({
+      canvas: document.getElementById("c"),
+      wasmUrl: "doom.wasm",
+      wadUrl: "freedm.wad.wasm",
+      wadName: "freedm.wad",
+      args: ["-altdeath", "-warp", "1", "-nomonsters"],
+      onStatus: (s) => setStatus(s),
+      onTick: () => net && net.tick(),
+    });
+  } catch (e) {
+    setStatus("Doom failed to start: " + e.message, true);
+    throw e;
+  }
+
+  // ---- input ----------------------------------------------------------
+  const held = new Set();
+  const onKey = (down) => (e) => {
+    const k = DOOM_KEYS[e.code];
+    if (k === undefined) return;
+    e.preventDefault();
+    if (down === held.has(e.code)) return; // ignore key repeat
+    down ? held.add(e.code) : held.delete(e.code);
+    doom.key(down, k);
+  };
+  window.addEventListener("keydown", onKey(true));
+  window.addEventListener("keyup", onKey(false));
+  window.addEventListener("blur", () => { for (const c of held) doom.key(false, DOOM_KEYS[c]); held.clear(); });
+
+  let buttons = 0;
+  screen.addEventListener("mousedown", (e) => {
+    screen.focus();
+    if (document.pointerLockElement !== screen) {
+      try { const p = screen.requestPointerLock(); p && p.catch && p.catch(() => {}); } catch {}
+    }
+    buttons |= 1 << e.button; doom.mouse(buttons, 0);
+  });
+  window.addEventListener("mouseup", (e) => { buttons &= ~(1 << e.button); doom.mouse(buttons, 0); });
+  document.addEventListener("mousemove", (e) => {
+    if (document.pointerLockElement === screen && e.movementX) doom.mouse(buttons, e.movementX * 2);
+  });
+  screen.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  // ---- multiplayer ----------------------------------------------------
+  const room = await (window.claude?.use?.("room") ?? null);
+  const user = await (window.claude?.use?.("user") ?? null);
+
+  if (!room) {
+    roomEl.textContent = "Multiplayer needs a signed-in claude.ai account with access to this artifact (public links play solo). Playing solo.";
+  } else {
+    const names = new Map(); // `by` id -> display name
+    let myId = null;
+    try { myId = user ? await user.id() : null; } catch {}
+
+    async function resolveNames(ids) {
+      const missing = [...new Set(ids)].filter((id) => id && !names.has(id));
+      if (!missing.length || !user) return;
+      try {
+        const ps = await user.profiles(missing);
+        for (const id of missing) names.set(id, (ps[id] && ps[id].name) || "");
+      } catch {}
+    }
+    const nameOf = (row) => (row.me ? names.get(myId) : names.get(row.by)) || row.nick || "Marine " + String(row.peer || "").slice(0, 4);
+
+    // Each tab picks a non-green color; green is always "you" on your own screen.
+    const color = 1 + Math.floor(Math.random() * 3);
+
+    let lastBoard = "";
+    let rowsCache = [];
+    net = startNet({
+      doom, room, color,
+      onScore(rows) {
+        rowsCache = rows;
+        const key = JSON.stringify(rows.map((r) => [r.peer, r.frags, r.by]));
+        if (key === lastBoard) return;
+        lastBoard = key;
+        renderBoard();
+        resolveNames([myId, ...rows.map((r) => r.by)]).then(renderBoard);
+      },
+      onFeed({ killer, victim }) {
+        const byPeer = (p) => rowsCache.find((r) => r.peer === p);
+        const v = byPeer(victim), k = killer && byPeer(killer);
+        const line = document.createElement("div");
+        if (!k || killer === victim) line.textContent = `${v ? nameOf(v) : "Someone"} died`;
+        else line.textContent = `${nameOf(k)} fragged ${v ? nameOf(v) : "someone"}`;
+        if ((k && k.me) || (v && v.me)) line.className = "me";
+        feedEl.append(line);
+        while (feedEl.children.length > 5) feedEl.firstChild.remove();
+        setTimeout(() => line.remove(), 6000);
+      },
+    });
+
+    function renderBoard() {
+      boardEl.replaceChildren(...rowsCache.map((r) => {
+        const li = document.createElement("li");
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        dot.style.background = r.me ? SWATCH[0] : SWATCH[r.color ?? 3];
+        const name = document.createElement("span");
+        name.className = "name" + (r.me ? " you" : "");
+        name.textContent = nameOf(r) + (r.me ? " (you)" : "");
+        const frags = document.createElement("span");
+        frags.className = "frags";
+        frags.textContent = r.frags;
+        li.append(dot, name, frags);
+        return li;
+      }));
+    }
+
+    const showRoom = () => {
+      const n = room.peers().length;
+      const b = document.createElement("b");
+      b.textContent = n <= 1 ? "Just you" : `${n} players`;
+      roomEl.replaceChildren(b, document.createTextNode(n <= 1
+        ? " here. Open this artifact in another tab, or share it with friends, to have someone to frag."
+        : " in the room."));
+    };
+    room.onPeers(showRoom);
+    room.onConnection((ok) => { if (!ok) roomEl.textContent = "Reconnecting..."; else showRoom(); });
+  }
+</script>

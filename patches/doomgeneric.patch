@@ -1,0 +1,105 @@
+diff --git a/doomgeneric/d_main.c b/doomgeneric/d_main.c
+index 9012e5f..b805127 100644
+--- a/doomgeneric/d_main.c
++++ b/doomgeneric/d_main.c
+@@ -196,7 +196,7 @@ void D_Display (void)
+     }
+ 
+     // save the current screen if about to wipe
+-    if (gamestate != wipegamestate)
++    if (0 && gamestate != wipegamestate) // doom-room: no blocking wipe
+ 		{
+ 		wipe = true;
+ 		wipe_StartScreen(0, 0, SCREENWIDTH, SCREENHEIGHT);
+diff --git a/doomgeneric/g_game.c b/doomgeneric/g_game.c
+index 9954d78..f77f0f3 100644
+--- a/doomgeneric/g_game.c
++++ b/doomgeneric/g_game.c
+@@ -1251,7 +1251,7 @@ void G_DoReborn (int playernum)
+ { 
+     int                             i; 
+ 	 
+-    if (!netgame)
++    if (!netgame && !deathmatch) // doom-room: respawn in solo deathmatch
+     {
+ 	// reload the level from scratch
+ 	gameaction = ga_loadlevel;  
+diff --git a/doomgeneric/m_random.c b/doomgeneric/m_random.c
+index 8e3b4e1..14e9e87 100644
+--- a/doomgeneric/m_random.c
++++ b/doomgeneric/m_random.c
+@@ -59,7 +59,11 @@ int M_Random (void)
+     return rndtable[rndindex];
+ }
+ 
++// doom-room: each browser runs its own world, so start every one at a
++// different point of the random table (spawn spots, damage rolls).
++int net_rng_seed = 0;
++
+ void M_ClearRandom (void)
+ {
+-    rndindex = prndindex = 0;
++    rndindex = prndindex = net_rng_seed & 0xff;
+ }
+diff --git a/doomgeneric/p_inter.c b/doomgeneric/p_inter.c
+index 1eb58cf..cd11231 100644
+--- a/doomgeneric/p_inter.c
++++ b/doomgeneric/p_inter.c
+@@ -38,6 +38,7 @@
+ #include "s_sound.h"
+ 
+ #include "p_inter.h"
++#include "net.h"
+ 
+ 
+ #define BONUSADD	6
+@@ -788,6 +789,9 @@ P_DamageMobj
+     fixed_t	thrust;
+     int		temp;
+ 	
++    if (Net_FilterDamage(target, source, damage)) // doom-room
++	return;
++
+     if ( !(target->flags & MF_SHOOTABLE) )
+ 	return;	// shouldn't happen...
+ 		
+diff --git a/doomgeneric/p_pspr.c b/doomgeneric/p_pspr.c
+index e4774c7..b0ebc2b 100644
+--- a/doomgeneric/p_pspr.c
++++ b/doomgeneric/p_pspr.c
+@@ -18,6 +18,7 @@
+ //
+ 
+ 
++#include "net.h"
+ #include "doomdef.h"
+ #include "d_event.h"
+ 
+@@ -241,6 +242,7 @@ void P_FireWeapon (player_t* player)
+     if (!P_CheckAmmo (player))
+ 	return;
+ 	
++    Net_LocalFired (player); // doom-room
+     P_SetMobjState (player->mo, S_PLAY_ATK1);
+     newstate = weaponinfo[player->readyweapon].atkstate;
+     P_SetPsprite (player, ps_weapon, newstate);
+diff --git a/doomgeneric/p_setup.c b/doomgeneric/p_setup.c
+index 00306e8..4abbd14 100644
+--- a/doomgeneric/p_setup.c
++++ b/doomgeneric/p_setup.c
+@@ -19,6 +19,7 @@
+ 
+ 
+ 
++#include "net.h"
+ #include <math.h>
+ 
+ #include "z_zone.h"
+@@ -747,6 +748,7 @@ P_SetupLevel
+   int		playermask,
+   skill_t	skill)
+ {
++    Net_LevelLoaded(); // doom-room
+     int		i;
+     char	lumpname[9];
+     int		lumpnum;

@@ -1,0 +1,6 @@
+/toolchain/
+/vendor/
+/build/
+/web/doom.wasm
+/web/freedm.wad.wasm
+*.ppm
