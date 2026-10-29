@@ -97,6 +97,13 @@ while (Date.now() - t0 < 15000 && diedAfter === null) {
 }
 A.doom.key(false, 0xa3);
 await sleep(500);
+// Nobody presses anything: the dead player must come back on its own.
+const t1 = Date.now();
+let respawnAfter = null;
+while (diedAfter !== null && Date.now() - t1 < 6000 && respawnAfter === null) {
+  await sleep(100);
+  if (!B.local()[7]) respawnAfter = Date.now() - t1 + 500;
+}
 
 const credited = (list) => list.some((e) => e.killer === "peerA" && e.victim === "peerB");
 const checks = [
@@ -105,6 +112,7 @@ const checks = [
   ["A sees its own frag", credited(feeds.A), JSON.stringify(feeds.A)],
   ["A sees B's name tag above its head", aTags.some((t) => t.peer === "peerB" && t.nick === "Bravo" && t.y < 100),
     JSON.stringify(aTags.map(({ peer, nick, x, y }) => ({ peer, nick, x, y })))],
+  ["B respawns by itself", respawnAfter !== null, respawnAfter !== null ? `${respawnAfter} ms after death` : "still dead"],
   ["A is untouched", A.local()[4] === 100 && Object.keys(aPose?.kb || {}).length === 0, `health ${A.local()[4]}`],
 ];
 let ok = true;

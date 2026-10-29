@@ -11,6 +11,7 @@
 #include "doomdef.h"
 #include "doomstat.h"
 #include "d_player.h"
+#include "d_event.h"
 #include "info.h"
 #include "m_random.h"
 #include "p_local.h"
@@ -37,6 +38,7 @@ static int death_count;       // local deaths
 static int last_killer = -1;  // ghost slot of the last killer, -1 for none
 static int net_frags;
 static int was_dead;
+static int dead_tics;
 
 int Net_IsGhost(mobj_t *mo)
 {
@@ -125,8 +127,18 @@ void net_after_tick(void)
     if (dead && !was_dead) {
         death_count++;
         last_killer = ghost_slot(p->attacker);
+        dead_tics = 0;
+        p->message = "CLICK OR PRESS SPACE TO RESPAWN";
     }
     was_dead = dead;
+
+    // Doom only respawns on "use". Also take a click (after a short beat, so
+    // a held trigger doesn't skip the death) and respawn on our own after 3 s.
+    if (dead) {
+        dead_tics++;
+        if ((dead_tics > TICRATE / 2 && (p->cmd.buttons & BT_ATTACK)) || dead_tics > 3 * TICRATE)
+            p->playerstate = PST_REBORN;
+    }
 
     // The status bar sums frags[i] for every i != consoleplayer.
     memset(p->frags, 0, sizeof(p->frags));

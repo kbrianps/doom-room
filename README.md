@@ -2,6 +2,10 @@
 
 Real Doom deathmatch inside a Claude artifact. The original engine, compiled to WebAssembly, runs in every player's browser tab, and the players find each other through the artifact's built-in `room` capability. No game server, no WebSocket, no Emscripten.
 
+![Three players in the same Claude artifact, two of them side by side](docs/claude-duel.gif)
+
+Two browser windows on the same artifact, with a third player in the room. Names float over heads, the scoreboard and the kill feed agree on both sides.
+
 ![A ghost marine in FreeDM MAP01, as seen by the other player](docs/ghost.png)
 
 The red marine above is another browser tab. It is drawn by the real Doom renderer, takes real hitscan damage, and dies with the real death animation, but its position comes over the network 30 times a second.
@@ -86,6 +90,8 @@ make         # web/doom.wasm and web/freedm.wad.wasm
 make test    # two engines, one duel, in Node
 make serve   # solo play at http://localhost:8080
 ```
+
+`tools/record_gif.mjs` records two headless engines dueling side by side (`probe` finds spawn pairs in sight, `record` writes a GIF and an MP4 with ffmpeg).
 
 ## Publish your own room
 

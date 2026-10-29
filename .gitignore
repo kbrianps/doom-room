@@ -4,3 +4,4 @@
 /web/doom.wasm
 /web/freedm.wad.wasm
 *.ppm
+docs/*.mp4
